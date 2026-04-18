@@ -1,0 +1,10 @@
+#Update instruction:
+
+# Pull new images
+docker compose pull
+
+# Restart & Update (This is zero-downtime friendly)
+docker compose up -d
+
+# Clean up the old image versions left behind
+docker image prune -f
