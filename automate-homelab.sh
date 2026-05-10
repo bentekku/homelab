@@ -18,7 +18,17 @@ echo "Found drive at $DEVICE_PATH. Attempting to mount..."
 
 # 3. Mount the drive if not already mounted
 if ! findmnt -kn "$MOUNT_POINT" > /dev/null; then
+    echo "Mount point is idle. Cleaning and mounting..."
+    # Ensure the directory is empty and clean before mounting
+    sudo umount -l "$MOUNT_POINT" 2>/dev/null
     sudo mount "$DEVICE_PATH" "$MOUNT_POINT"
+    
+    # Verify the mount actually worked before proceeding
+    if ! findmnt -kn "$MOUNT_POINT" > /dev/null; then
+        echo "FAIL: Drive refused to mount. Aborting to save SSD space."
+        exit 1
+    fi
+    sleep 2
 fi
 
 # 4. Handle Docker containers
