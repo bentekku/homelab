@@ -24,7 +24,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 5000M # Using deploy block instead of mem_limit
+          memory: 5000M
         reservations:
           devices:
             - driver: nvidia
@@ -48,7 +48,7 @@ services:
       resources:
         limits:
           cpus: "4"
-          memory: 4096M # Using deploy block instead of mem_limit
+          memory: 4096M
         reservations:
           devices:
             - driver: nvidia
@@ -67,7 +67,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M # Using deploy block instead of mem_limit
+          memory: 512M
     volumes:
       - ${DB_DATA_LOCATION}:/var/lib/postgresql/data
     healthcheck:
@@ -83,7 +83,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M # Using deploy block instead of mem_limit
+          memory: 256M
     healthcheck:
       test: ["CMD", "valkey-cli", "ping"]
       interval: 10s
@@ -91,7 +91,8 @@ services:
       retries: 5
 
   # ---------------------------------------------------------
-  # JELLYFIN
+  # JELLYFIN — Movies & TV (GPU transcoding)
+  # Music playback handled by Corvus (cloud-audio-dns branch)
   # ---------------------------------------------------------
   jellyfin:
     container_name: jellyfin
@@ -114,60 +115,6 @@ services:
     volumes:
       - /mnt/homelab/server/config/jellyfin:/config
       - /mnt/homelab/server/data/media:/media
-
-  # ---------------------------------------------------------
-  # FEISHIN
-  # ---------------------------------------------------------
-  feishin:
-    container_name: feishin
-    image: ghcr.io/jeffvli/feishin:latest
-    restart: unless-stopped
-    environment:
-      - SERVER_NAME=${FEISHIN_SERVER_NAME}
-      - SERVER_TYPE=${FEISHIN_SERVER_TYPE}
-      - SERVER_URL=${FEISHIN_SERVER_URL}
-      - SERVER_LOCK=${FEISHIN_SERVER_LOCK}
-      - ANALYTICS_DISABLED=true
-    ports:
-      - "9180:9180"
-    deploy:
-      resources:
-        limits:
-          memory: 512M # Using deploy block instead of mem_limit
-    depends_on:
-      - jellyfin
-
-  # ---------------------------------------------------------
-  # OPENCLOUD
-  # ---------------------------------------------------------
-  opencloud:
-    container_name: opencloud
-    image: opencloudeu/opencloud-rolling:latest
-    restart: unless-stopped
-    network_mode: host # shares host network — no ports: needed
-    entrypoint:
-      - /bin/sh
-      - -c
-      - |
-        opencloud init || true
-        opencloud server
-    environment:
-      - OC_INSECURE=false
-      - OC_URL=${OC_URL}
-      - OC_LOG_LEVEL=warn
-      - PROXY_TLS=false
-      - PROXY_HTTP_ADDR=0.0.0.0:9200
-      - IDM_CREATE_DEMO_USERS=false
-      - TZ=${TZ}
-    # no ports: with host networking
-    # no extra_hosts: not needed
-    deploy:
-      resources:
-        limits:
-          memory: 1024M
-    volumes:
-      - ${OC_CONFIG_DIR}:/etc/opencloud
-      - ${OC_DATA_DIR}:/var/lib/opencloud
 
 volumes:
   model-cache:
