@@ -1,205 +1,294 @@
 # 🏠 Homelab
 
-Personal homelab server running **Immich**, **Jellyfin**, **Feishin**, and **OpenCloud** via Docker — accessible privately and securely over [Tailscale](https://tailscale.com/).
+A two-node personal homelab running self-hosted services via Docker — accessible privately and securely over [Tailscale](https://tailscale.com/).
+
+---
+
+## 🖥️ Nodes
+
+| Node       | Hardware                                         | OS                      | Role                              |
+| ---------- | ------------------------------------------------ | ----------------------- | --------------------------------- |
+| **Sirius** | Custom build · NVIDIA RTX 2070 Super · 16GB RAM  | CachyOS (Arch-based)    | Primary — Photos, media, ML       |
+| **Corvus** | HP 245 G4 · AMD Radeon R5 (iGPU) · 8GB RAM · HDD | Ubuntu Server 26.04 LTS | Lightweight — Music, storage, DNS |
+
+> Sirius is the on-demand powerhouse. Corvus runs 24/7 as a low-power always-on node for music, file storage, and network-wide ad blocking.
 
 ---
 
 ## 📦 Services
 
-| Service                                       | Purpose                                           | Default Port                 |
-| --------------------------------------------- | ------------------------------------------------- | ---------------------------- |
-| [Immich](https://immich.app/)                 | Photo & video backup and management               | `2283`                       |
-| [Jellyfin](https://jellyfin.org/)             | Media server for movies, TV, music                | `8096`                       |
-| [Feishin](https://github.com/jeffvli/feishin) | Music player frontend for Jellyfin                | `9180`                       |
-| [OpenCloud](https://opencloud.eu/)            | Self-hosted cloud storage (Nextcloud alternative) | `9200` (via Tailscale HTTPS) |
+### Sirius (`main` branch)
 
-> **Note:** Immich uses PostgreSQL (with pgvecto.rs) and Valkey (Redis fork) as internal dependencies — both are included in the compose stack.
+| Service                                       | Purpose                                        | Default Port                 |
+| --------------------------------------------- | ---------------------------------------------- | ---------------------------- |
+| [Immich](https://immich.app/)                 | Photo & video backup and management            | `2283`                       |
+| [Jellyfin](https://jellyfin.org/)             | Media server for movies & TV (GPU transcoding) | `8096`                       |
+| [Feishin](https://github.com/jeffvli/feishin) | Music player frontend for Jellyfin             | `9180`                       |
+| [OpenCloud](https://opencloud.eu/)            | Self-hosted cloud storage                      | `9200` (via Tailscale HTTPS) |
+
+> Immich uses PostgreSQL (with pgvecto.rs) and Valkey (Redis fork) as internal dependencies — both included in the compose stack.
+
+### Corvus (`cloud-audio-dns` branch)
+
+| Service                                       | Purpose                                   | Default Port                    |
+| --------------------------------------------- | ----------------------------------------- | ------------------------------- |
+| [Jellyfin](https://jellyfin.org/)             | Music-only media server (CPU transcoding) | `8096`                          |
+| [Feishin](https://github.com/jeffvli/feishin) | Music player frontend for Jellyfin        | `9180`                          |
+| [OpenCloud](https://opencloud.eu/)            | Self-hosted cloud storage                 | `9200` (via Tailscale HTTPS)    |
+| [Pi-hole](https://pi-hole.net/)               | Network-wide ad blocking + DNS            | `53` (DNS) · `8080` (dashboard) |
+
+> Corvus has no dedicated GPU. Jellyfin runs CPU-only transcoding — sufficient for music. Pi-hole doubles as the LAN DNS server and, via Tailscale, blocks ads on cellular too.
 
 ---
 
 ## ⚙️ Requirements
 
+### Sirius
+
 - A Linux machine (tested on CachyOS / Arch-based distros)
 - [Docker](https://docs.docker.com/engine/install/) and Docker Compose v2
-- An NVIDIA GPU (for hardware-accelerated transcoding and Immich ML) with [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) installed
-- [Tailscale](https://tailscale.com/download) installed and authenticated on the server
-- An external HDD or a dedicated storage path for media and Immich library
+- An NVIDIA GPU with [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+- [Tailscale](https://tailscale.com/download) installed and authenticated
+- External HDD or dedicated storage path for media and Immich library
+
+### Corvus
+
+- Ubuntu Server 26.04 LTS
+- [Docker](https://docs.docker.com/engine/install/) and Docker Compose v2
+- [Tailscale](https://tailscale.com/download) installed and authenticated
+- A **static LAN IP** assigned to Corvus (via DHCP reservation on router) — required for Pi-hole DNS
 
 ---
 
 ## 🚀 Setup Guide
 
-### 1. Clone the repository
+### Sirius (`main` branch)
+
+#### 1. Clone the repository
 
 ```bash
 git clone <your-repo-url> ~/server
 cd ~/server
 ```
 
-### 2. Configure the `.env` file
-
-Copy `.env.example` to `.env` (if provided) or edit `.env` directly. Replace the following values:
+#### 2. Configure the `.env` file
 
 ```env
 # Immich
-IMMICH_VERSION=v2.x.x        # Pin to a specific release. Check release notes before updating.
-UPLOAD_LOCATION=/mnt/homelab/server/data/immich/library   # Where Immich stores photos/videos
-DB_DATA_LOCATION=./docker-data/postgres/                  # Preferably on SSD for performance
-DB_PASSWORD=yourpassword      # Set a strong password
+IMMICH_VERSION=v2.x.x
+UPLOAD_LOCATION=/mnt/homelab/server/data/immich/library
+DB_DATA_LOCATION=./docker-data/postgres/
+DB_PASSWORD=yourpassword
 
 # Feishin
-FEISHIN_SERVER_NAME=Jellyfin  # Display name for the server (e.g. Jellyfin, Navidrome)
-FEISHIN_SERVER_TYPE=jellyfin  # Server type: jellyfin or navidrome
-FEISHIN_SERVER_URL=http://<tailscale-ip>:8096             # Your Jellyfin URL via Tailscale IP
-FEISHIN_SERVER_LOCK=true      # Locks server settings for users (recommended)
+FEISHIN_SERVER_NAME=Jellyfin
+FEISHIN_SERVER_TYPE=jellyfin
+FEISHIN_SERVER_URL=http://<tailscale-ip>:8096
+FEISHIN_SERVER_LOCK=true
 
 # OpenCloud
 OC_CONFIG_DIR=/mnt/homelab/server/config/opencloud
 OC_DATA_DIR=/mnt/homelab/server/data/opencloud
-OC_TAILSCALE_HOSTNAME=yourserver.hyena-fujita.ts.net      # Run: tailscale status
-OC_URL=https://yourserver.hyena-fujita.ts.net             # Must use https://
+OC_TAILSCALE_HOSTNAME=sirius.hyena-fujita.ts.net
+OC_URL=https://sirius.hyena-fujita.ts.net
 ```
 
-> **Tip:** Run `tailscale status` to find your server's Tailscale hostname and IP.
+> Run `tailscale status` to find your Tailscale hostname and IP.
 
-### 3. Create required directories
+#### 3. Create required directories
 
 ```bash
 mkdir -p /mnt/homelab/server/{config,data}/{jellyfin,opencloud}
 mkdir -p /mnt/homelab/server/data/{immich/library,media}
 ```
 
-### 4. Set up Tailscale HTTPS for OpenCloud
-
-OpenCloud requires HTTPS for its OIDC authentication to work correctly. Tailscale's built-in serve feature handles this cleanly without needing a reverse proxy:
+#### 4. Set up Tailscale HTTPS for OpenCloud
 
 ```bash
-# Allow Tailscale serve without sudo in future (run once)
 sudo tailscale set --operator=$USER
-
-# Expose OpenCloud over HTTPS via Tailscale
 sudo tailscale serve --bg http://localhost:9200
 ```
 
-This makes OpenCloud accessible at `https://yourserver.hyena-fujita.ts.net` with a valid Tailscale-issued certificate — no self-signed cert warnings.
-
-> **Important:** OpenCloud uses `network_mode: host` in the compose file. This is required so it can reach the Tailscale interface for OIDC token verification. Do not remove this.
-
-### 5. Start the stack
+#### 5. Start the stack
 
 ```bash
 docker compose up -d
 ```
 
-Or use the automation script (see below).
+---
+
+### Corvus (`cloud-audio-dns` branch)
+
+#### 1. Clone and switch branch
+
+```bash
+git clone <your-repo-url> ~/server
+cd ~/server
+git checkout cloud-audio-dns
+```
+
+#### 2. Configure the `.env` file
+
+```env
+# General
+TZ=Asia/Kolkata
+CORVUS_LAN_IP=192.168.1.100        # Corvus's static LAN IP — check your router's DHCP table
+
+# Jellyfin
+JELLYFIN_CONFIG_DIR=/mnt/homelab/config/jellyfin
+JELLYFIN_MUSIC_DIR=/mnt/homelab/data/music
+
+# Feishin
+FEISHIN_SERVER_NAME=Jellyfin
+FEISHIN_SERVER_TYPE=jellyfin
+FEISHIN_SERVER_URL=http://localhost:8096
+FEISHIN_SERVER_LOCK=true
+
+# OpenCloud
+OC_CONFIG_DIR=/mnt/homelab/config/opencloud
+OC_DATA_DIR=/mnt/homelab/data/opencloud
+OC_URL=https://corvus.hyena-fujita.ts.net    # Update after tailscale status
+
+# Pi-hole
+PIHOLE_WEBPASSWORD=yourpassword
+PIHOLE_CONFIG_DIR=/mnt/homelab/config/pihole
+PIHOLE_UPSTREAM_DNS_1=1.1.1.1
+PIHOLE_UPSTREAM_DNS_2=1.0.0.1
+```
+
+#### 3. Create required directories
+
+```bash
+mkdir -p /mnt/homelab/{config,data}/{jellyfin,opencloud}
+mkdir -p /mnt/homelab/config/pihole/{etc-pihole,etc-dnsmasq.d}
+mkdir -p /mnt/homelab/data/music
+```
+
+#### 4. Fix systemd-resolved port conflict (Pi-hole prerequisite)
+
+Ubuntu Server uses `systemd-resolved` which occupies port 53 by default. Pi-hole cannot bind until this is disabled:
+
+```bash
+sudo sed -i 's/#DNSStubListener=yes/DNSStubListener=no/' /etc/systemd/resolved.conf
+sudo systemctl restart systemd-resolved
+```
+
+> Do this **before** `docker compose up`, or Pi-hole will fail to start.
+
+#### 5. Assign Corvus a static LAN IP
+
+On your router (e.g. ZTE Airtel Xtreme — usually at `192.168.0.1`), go to **Advanced → DHCP** and add a reservation for Corvus's MAC address. Update `CORVUS_LAN_IP` in `.env` to match.
+
+#### 6. Set up Tailscale HTTPS for OpenCloud
+
+```bash
+sudo tailscale set --operator=$USER
+sudo tailscale serve --bg http://localhost:9200
+```
+
+Then run `tailscale status` to confirm Corvus's hostname and update `OC_URL` in `.env`.
+
+#### 7. Start the stack
+
+```bash
+docker compose up -d
+```
 
 ---
 
-## 🤖 Automation Script (`automate-homelab.sh`)
+## 🔒 Pi-hole — Network & Remote Ad Blocking
 
-The script automates mounting your external HDD and starting all containers. Move it somewhere convenient:
+### Router-level DNS (LAN)
 
-```bash
-mv automate-homelab.sh ~/automate-homelab.sh
-chmod +x ~/automate-homelab.sh
+Set **Corvus's static LAN IP** as the primary DNS server in your router settings:
+
+- ZTE Airtel Xtreme: `192.168.0.1` → Advanced → DNS → Primary DNS → `<CORVUS_LAN_IP>`
+
+All devices on your home network will have ads blocked automatically — no per-device setup needed.
+
+### Cellular ad blocking via Tailscale DNS Override
+
+To block ads on your phone even on mobile data (no exit node required — only DNS queries are tunnelled):
+
+1. Open [Tailscale Admin Console](https://login.tailscale.com/admin/dns)
+2. Go to **DNS → Nameservers → Add nameserver**
+3. Enter Corvus's Tailscale IP (find it via `tailscale status` on Corvus)
+4. Enable **"Override local DNS"**
+
+Every Tailscale-connected device now routes DNS through Pi-hole, regardless of network.
+
+### Pi-hole Dashboard
+
 ```
-
-Add an alias for quick access:
-
-```bash
-echo "alias start-lab='~/automate-homelab.sh'" >> ~/.bashrc
-source ~/.bashrc
-```
-
-Then just run:
-
-```bash
-start-lab
-```
-
-The script:
-
-1. Detects your 1.8T external drive by size using `lsblk`
-2. Mounts it to `/mnt/homelab` if not already mounted
-3. Restarts all Docker containers from `~/server`
-
-> **Note:** The drive detection searches by size (`1.8T`). If your drive is a different size, update the grep pattern in the script accordingly.
-
----
-
-## 🔐 Accessing Your Services
-
-All services are accessible via Tailscale — you must be connected to your Tailscale network on any device to reach them.
-
-| Service   | URL                            |
-| --------- | ------------------------------ |
-| Immich    | `http://<tailscale-ip>:2283`   |
-| Jellyfin  | `http://<tailscale-ip>:8096`   |
-| Feishin   | `http://<tailscale-ip>:9180`   |
-| OpenCloud | `https://<tailscale-hostname>` |
-
-Find your server's Tailscale IP and hostname:
-
-```bash
-tailscale status
+http://<CORVUS_LAN_IP>:8080/admin
 ```
 
 ---
 
 ## 🔑 OpenCloud — First Login & Setup
 
-On first boot, OpenCloud generates a random admin password. Retrieve it from the logs:
+On first boot, OpenCloud generates a random admin password. Retrieve it:
 
 ```bash
 docker logs opencloud 2>&1 | grep -A3 "generated OpenCloud Config"
 ```
 
-Log in at `https://yourserver.hyena-fujita.ts.net` with:
+Log in at `https://<node>.hyena-fujita.ts.net` with username `admin` and the password from above.
 
-- **Username:** `admin`
-- **Password:** _(from logs above)_
-
-**To change the admin password:**
-
-Go to avatar (top right) → **Preferences** → scroll to the password section.
-
-Alternatively, reset it via CLI (container must be stopped first):
+**To reset the admin password via CLI:**
 
 ```bash
 docker stop opencloud
 docker run --rm -it \
-  -v /mnt/homelab/server/config/opencloud:/etc/opencloud \
-  -v /mnt/homelab/server/data/opencloud:/var/lib/opencloud \
+  -v <OC_CONFIG_DIR>:/etc/opencloud \
+  -v <OC_DATA_DIR>:/var/lib/opencloud \
   opencloudeu/opencloud-rolling:latest idm resetpassword
 docker start opencloud
 ```
 
-**To create user accounts:**
+**To create user accounts:** Grid icon (top left) → **Admin Settings** → **Users** → **Create User**.
 
-Grid icon (top left) → **Admin Settings** → **Users** → **Create User**. Each user gets isolated personal storage.
+---
+
+## 🔐 Accessing Services
+
+All services require Tailscale to be connected.
+
+### Sirius
+
+| Service   | URL                                  |
+| --------- | ------------------------------------ |
+| Immich    | `http://<sirius-tailscale-ip>:2283`  |
+| Jellyfin  | `http://<sirius-tailscale-ip>:8096`  |
+| Feishin   | `http://<sirius-tailscale-ip>:9180`  |
+| OpenCloud | `https://sirius.hyena-fujita.ts.net` |
+
+### Corvus
+
+| Service           | URL                                  |
+| ----------------- | ------------------------------------ |
+| Jellyfin          | `http://<corvus-tailscale-ip>:8096`  |
+| Feishin           | `http://<corvus-tailscale-ip>:9180`  |
+| OpenCloud         | `https://corvus.hyena-fujita.ts.net` |
+| Pi-hole Dashboard | `http://<corvus-lan-ip>:8080/admin`  |
 
 ---
 
 ## 🔄 Updating Services
 
 ```bash
-# Pull latest images
 docker compose pull
-
-# Restart with new images (zero-downtime friendly)
 docker compose up -d
-
-# Clean up old image versions
 docker image prune -f
 ```
 
-> **Immich warning:** Always check the [Immich release notes](https://github.com/immich-app/immich/releases) before updating — it is under active development and occasionally has breaking changes. Pin `IMMICH_VERSION` to a specific release tag rather than using `latest`.
+> **Immich warning (Sirius only):** Always check [Immich release notes](https://github.com/immich-app/immich/releases) before updating. Pin `IMMICH_VERSION` to a specific tag rather than `latest`.
 
 ---
 
 ## 💾 RAM Allocation
 
-The stack is tuned for a 16GB RAM system:
+### Sirius (16GB)
 
 | Service                 | Memory Limit |
 | ----------------------- | ------------ |
@@ -211,12 +300,39 @@ The stack is tuned for a 16GB RAM system:
 | postgres                | 512M         |
 | redis (valkey)          | 256M         |
 
-These are **ceilings**, not reservations — services only use what they need.
+### Corvus (8GB)
+
+| Service   | Memory Limit |
+| --------- | ------------ |
+| jellyfin  | 512M         |
+| opencloud | 768M         |
+| feishin   | 256M         |
+| pihole    | 256M         |
+
+> These are **ceilings**, not reservations. Corvus runs comfortably under 2.5GB total at full load, leaving ample headroom.
+
+---
+
+## 🤖 Automation Script — Sirius (`automate-homelab.sh`)
+
+```bash
+mv automate-homelab.sh ~/automate-homelab.sh
+chmod +x ~/automate-homelab.sh
+echo "alias start-lab='~/automate-homelab.sh'" >> ~/.bashrc
+source ~/.bashrc
+start-lab
+```
+
+The script detects your 1.8T external drive by size, mounts it to `/mnt/homelab`, and restarts all containers. Update the grep size pattern if your drive is a different size.
+
+> Corvus does not use an external drive — music and data live on the internal HDD.
 
 ---
 
 ## 📝 Notes
 
 - **Feishin** is in maintenance mode as of late 2024. Its successor is [Audioling](https://github.com/audioling/audioling) — worth watching.
-- **OpenCloud** runs with `network_mode: host` due to Tailscale networking requirements. This is intentional and safe for a private homelab.
-- **Tailscale serve** must be running for OpenCloud to be accessible. It does not persist across reboots automatically — add it to your startup routine or use `automate-homelab.sh`.
+- **OpenCloud** runs with `network_mode: host` on both nodes due to Tailscale networking requirements for OIDC. This is intentional and safe for a private homelab.
+- **Tailscale serve** must be running for OpenCloud to be accessible. It does not persist across reboots automatically — add it to your startup routine.
+- **Corvus has no dedicated GPU.** AMD Radeon R5 is an integrated GPU sharing system RAM. Hardware transcoding via Docker is not configured. For music-only Jellyfin use, CPU transcoding is more than sufficient.
+- **Pi-hole requires a static LAN IP on Corvus.** If Corvus's IP changes, DNS breaks for the whole network. Always use a DHCP reservation.
