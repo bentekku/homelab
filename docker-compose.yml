@@ -107,6 +107,7 @@ services:
       - FTLCONF_LOCAL_IPV4=${CORVUS_LAN_IP} # Corvus's static LAN IP
       - DNSSEC=true # Enable DNSSEC validation
       - DNS_BOGUS_PRIV=true # Ignore reverse lookups for private IPs
+      - FTLCONF_dns_listeningMode=ALL # Listen on all interfaces (required for tailscale connected devices to be able to use Pi-hole and internet)
     volumes:
       - ${PIHOLE_CONFIG_DIR}/etc-pihole:/etc/pihole
       - ${PIHOLE_CONFIG_DIR}/etc-dnsmasq.d:/etc/dnsmasq.d
