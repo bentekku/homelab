@@ -135,8 +135,8 @@ TZ=Asia/Kolkata
 CORVUS_LAN_IP=192.168.1.100        # Corvus's static LAN IP — check your router's DHCP table
 
 # Jellyfin
-JELLYFIN_CONFIG_DIR=/mnt/homelab/config/jellyfin
-JELLYFIN_MUSIC_DIR=/mnt/homelab/data/music
+JELLYFIN_CONFIG_DIR=/opt/homelab/config/jellyfin
+JELLYFIN_MUSIC_DIR=/opt/homelab/data/music
 
 # Feishin
 FEISHIN_SERVER_NAME=Jellyfin
@@ -145,13 +145,13 @@ FEISHIN_SERVER_URL=http://localhost:8096
 FEISHIN_SERVER_LOCK=true
 
 # OpenCloud
-OC_CONFIG_DIR=/mnt/homelab/config/opencloud
-OC_DATA_DIR=/mnt/homelab/data/opencloud
+OC_CONFIG_DIR=/opt/homelab/config/opencloud
+OC_DATA_DIR=/opt/homelab/data/opencloud
 OC_URL=https://corvus.hyena-fujita.ts.net    # Update after tailscale status
 
 # Pi-hole
 PIHOLE_WEBPASSWORD=yourpassword
-PIHOLE_CONFIG_DIR=/mnt/homelab/config/pihole
+PIHOLE_CONFIG_DIR=/opt/homelab/config/pihole
 PIHOLE_UPSTREAM_DNS_1=1.1.1.1
 PIHOLE_UPSTREAM_DNS_2=1.0.0.1
 ```
@@ -159,9 +159,12 @@ PIHOLE_UPSTREAM_DNS_2=1.0.0.1
 #### 3. Create required directories
 
 ```bash
-mkdir -p /mnt/homelab/{config,data}/{jellyfin,opencloud}
-mkdir -p /mnt/homelab/config/pihole/{etc-pihole,etc-dnsmasq.d}
-mkdir -p /mnt/homelab/data/music
+sudo mkdir -p /opt/homelab/{config,data}/{jellyfin,opencloud}
+sudo mkdir -p /opt/homelab/config/pihole/{etc-pihole,etc-dnsmasq.d}
+sudo mkdir -p /opt/homelab/data/music
+
+# Give your user ownership so Docker doesn't need root for volume mounts
+sudo chown -R $USER:$USER /opt/homelab
 ```
 
 #### 4. Fix systemd-resolved port conflict (Pi-hole prerequisite)
