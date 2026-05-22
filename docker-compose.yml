@@ -78,6 +78,151 @@ services:
       - ${OC_DATA_DIR}:/var/lib/opencloud
 
   # ---------------------------------------------------------
+  # NTFY — Self-hosted pub/sub push notification service
+  #
+  # HOW IT WORKS:
+  #   Publish:   curl -d "Backup done!" http://corvus:9090/my-topic
+  #   Subscribe: ntfy app on phone → add server → subscribe to topic
+  #
+  # ACCESS:
+  #   LAN:       http://<CORVUS_LAN_IP>:9090
+  #   Tailscale: add `tailscale serve --bg http://localhost:9090`
+  #              then use https://corvus.<tailnet>.ts.net/ntfy (or a subpath)
+  #              OR just use the LAN URL while on tailscale — both work.
+  #
+  # AUTH (recommended — stops strangers publishing to your topics):
+  #   After first run:
+  #     docker exec -it ntfy ntfy user add --role=admin <username>
+  #     docker exec -it ntfy ntfy user add <username>          # regular user
+  #   Then in server.yml set: auth-default-access: deny-all
+  #
+  # ANDROID/iOS: Install the "ntfy" app → Settings → Default server →
+  #   http://<CORVUS_LAN_IP>:9090  (or Tailscale URL)
+  # ---------------------------------------------------------
+  ntfy:
+    container_name: ntfy
+    image: binwiederhier/ntfy:latest
+    restart: unless-stopped
+    command:
+      - serve
+    environment:
+      - TZ=${TZ}
+      - NTFY_BASE_URL=${NTFY_BASE_URL} # Used in web UI links & email notifications
+      - NTFY_LISTEN_HTTP=:9090
+      - NTFY_CACHE_FILE=/var/cache/ntfy/cache.db # Persist messages across restarts
+      - NTFY_CACHE_DURATION=${NTFY_CACHE_DURATION} # How long to keep messages (e.g. 24h, 48h, 7d)
+      - NTFY_AUTH_FILE=/var/lib/ntfy/auth.db # User/token auth database
+      - NTFY_AUTH_DEFAULT_ACCESS=deny-all # Require auth — no anonymous publish/subscribe
+      - NTFY_BEHIND_PROXY=true # Trust X-Forwarded-For (set false if not behind proxy)
+      - NTFY_ATTACHMENT_CACHE_DIR=/var/cache/ntfy/attachments
+      - NTFY_UPSTREAM_BASE_URL=${NTFY_UPSTREAM_BASE_URL}
+    ports:
+      - "9090:9090"
+    deploy:
+      resources:
+        limits:
+          memory: 128M # Extremely lightweight — ~10–20 MB typical
+    volumes:
+      - ${NTFY_CACHE_DIR}:/var/cache/ntfy # Message cache + attachments
+      - ${NTFY_DATA_DIR}:/var/lib/ntfy # Auth DB
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q --tries=1 http://localhost:9090/v1/health -O /dev/null || exit 1",
+        ]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ---------------------------------------------------------
+  # WATCHDOG — Downtime alerter for Jellyfin & Pi-hole → ntfy
+  #
+  # Uses Alpine + curl (no extra image needed). Polls each service
+  # every WATCHDOG_INTERVAL seconds and fires an ntfy notification
+  # ONLY on state change (up→down or down→up), so you won't get
+  # spammed every minute — just one alert when it dies, one when
+  # it recovers.
+  #
+  # network_mode: host — required to reach:
+  #   • Pi-hole    (host network, port 80)
+  #   • Jellyfin   (published to host port 8096)
+  #   • ntfy       (published to host port 9090)
+  #
+  # State is tracked via temp files in /tmp (ephemeral — fine,
+  # worst case is one extra notification on container restart).
+  #
+  # TO ADD MORE SERVICES: duplicate a check_service call at the
+  # bottom of the script with the service name + its health URL.
+  # ---------------------------------------------------------
+  watchdog:
+    container_name: watchdog
+    image: alpine:latest
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - NTFY_URL=http://localhost:9090
+      - NTFY_TOPIC=${WATCHDOG_NTFY_TOPIC}
+      - NTFY_USER=${WATCHDOG_NTFY_USER}
+      - NTFY_PASS=${WATCHDOG_NTFY_PASS}
+      - WATCHDOG_INTERVAL=${WATCHDOG_INTERVAL}
+    deploy:
+      resources:
+        limits:
+          memory: 32M
+    depends_on:
+      - ntfy
+    command:
+      - /bin/sh
+      - -c
+      - |
+        apk add --no-cache curl > /dev/null 2>&1
+
+        notify() {
+          TITLE="$1"
+          BODY="$2"
+          PRIORITY="$3"
+          TAGS="$4"
+          curl -s \
+            -u "$${NTFY_USER}:$${NTFY_PASS}" \
+            -H "Title: $${TITLE}" \
+            -H "Priority: $${PRIORITY}" \
+            -H "Tags: $${TAGS}" \
+            -d "$${BODY}" \
+            "$${NTFY_URL}/$${NTFY_TOPIC}" > /dev/null
+        }
+
+        check_service() {
+          NAME="$1"
+          URL="$2"
+          STATE_FILE="/tmp/down_$${NAME}"
+
+          if curl -sf --max-time 5 "$${URL}" > /dev/null 2>&1; then
+            # Service is UP — was it previously marked down?
+            if [ -f "$${STATE_FILE}" ]; then
+              notify "✅ $${NAME} recovered" "$${NAME} is back up on Corvus" "default" "white_check_mark"
+              rm -f "$${STATE_FILE}"
+            fi
+          else
+            # Service is DOWN — only alert if this is a new outage
+            if [ ! -f "$${STATE_FILE}" ]; then
+              notify "🔴 $${NAME} is DOWN" "$${NAME} is not responding on Corvus" "high" "rotating_light"
+              touch "$${STATE_FILE}"
+            fi
+          fi
+        }
+
+        # Brief startup delay so ntfy has time to initialise
+        sleep 15
+
+        while true; do
+          check_service "Jellyfin" "http://localhost:8096/health"
+          check_service "Pi-hole"  "http://localhost/admin/index.php"
+          sleep "$${WATCHDOG_INTERVAL:-60}"
+        done
+
+  # ---------------------------------------------------------
   # PI-HOLE — Network-wide ad blocking + DNS
   #
   # BEFORE FIRST RUN — disable systemd-resolved stub listener:
@@ -116,3 +261,4 @@ services:
     dns:
       - 127.0.0.1 # Pi-hole resolves its own queries first
       - 1.1.1.1 # Cloudflare fallback (in case Pi-hole hasn't started yet)
+
